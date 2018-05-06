@@ -1,0 +1,76 @@
+---
+title: "2.0-data-preprocessing.Rmd"
+author: '@nozma'
+date: "2018/5/6"
+output:
+  html_document:
+    df_print: kable
+  
+---
+
+```{r, message=FALSE}
+library(mlr)
+library(dplyr)
+```
+
+# 前処理
+
+## データ読み込み
+
+```{r, message=FALSE}
+train_df <- readr::read_csv("../data/download/train.csv", 
+                            col_types = cols(
+                              PassengerId = col_character(),
+                              Survived = col_factor(levels = NULL),
+                              Pclass = col_factor(levels = NULL),
+                              Name = col_character(),
+                              Sex = col_factor(levels = NULL),
+                              Age = col_double(),
+                              SibSp = col_integer(),
+                              Parch = col_integer(),
+                              Ticket = col_character(),
+                              Fare = col_double(),
+                              Cabin = col_factor(levels = NULL),
+                              Embarked = col_factor(levels = NULL)
+                            )) %>% as.data.frame()
+test_df <- readr::read_csv("../data/download/test.csv",
+                           col_types = cols(
+                              PassengerId = col_character(),
+                              Pclass = col_factor(levels = NULL),
+                              Name = col_character(),
+                              Sex = col_factor(levels = NULL),
+                              Age = col_double(),
+                              SibSp = col_integer(),
+                              Parch = col_integer(),
+                              Ticket = col_character(),
+                              Fare = col_double(),
+                              Cabin = col_factor(levels = NULL),
+                              Embarked = col_factor(levels = NULL)
+                            )) %>% as.data.frame()
+```
+
+# 簡易の分析
+
+ざっくりランダムフォレストでやってみる。
+
+## タスクの生成
+
+```{r}
+train_df_mini <- train_df[, c("Survived", "Pclass", "Sex", "Age", "SibSp", "Parch", "Fare", "Cabin", "Embarked")]
+test_df_mini <- test_df[, c("Pclass", "Sex", "Age", "SibSp", "Parch", "Fare", "Cabin", "Embarked")]
+classif.task <- makeClassifTask(id = "Titanic", data = train_df_mini, 
+                                target = "Survived", positive = 1)
+```
+
+## 学習器の構築
+
+```{r}
+classif.lrn <- makeLearner("classif.randomForest")
+```
+
+## 学習機の訓練
+
+```{r}
+model <- train(classif.lrn, classif.task)
+```
+
