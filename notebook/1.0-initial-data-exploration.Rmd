@@ -1,0 +1,232 @@
+---
+title: "データの概要の確認"
+author: '@nozma'
+date: "2018/5/6"
+output:
+  html_document:
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## ライブラリ読み込み
+
+```{r, message=FALSE}
+library(dplyr)
+library(DT)
+library(ggplot2)
+```
+
+## データ読み込み
+
+```{r, message=FALSE}
+train_df <- readr::read_csv("../data/download/train.csv")
+test_df <- readr::read_csv("../data/download/test.csv")
+```
+
+## データの概要確認
+
+まず、データの概要を確認する。
+
+```{r}
+head(train_df)
+```
+
+```{r}
+head(test_df)
+```
+
+目的変数はSurvivedであり、訓練データのみに含まれている。
+
+各変数の説明は以下の通り([Titanic: Machine Learning from Disaster | Kaggle](https://www.kaggle.com/c/titanic/data)に基づくが、一部変数名が異なるので実際のデータセットに合わせて修正している)。
+
+- PassengerId: 乗客ID。
+- Survived: 0が死亡、1が生存。
+- Pclass: チケットのクラス。1が1st、2が2nd、3が3rd
+- Name: 名前
+- Sex: 性別
+- Age: 年齢
+- SibSp: 兄弟(Sibling)と配偶者(Spouse)の人数。配偶者には愛人と婚約者は含まれない。
+- Parch: 親(Parent)と子(Child)の人数。乳母と旅行していた子供の場合は0になっている。
+- Ticket: チケット番号
+- Fare: 運賃
+- Cabin: キャビン番号
+- Embarked: 乗船した港。C、Q、Sの3種類の値が含まれる。CはCherbourg、QはQueenstown、SはSouthamptonの略。
+
+## 欠損値の確認
+
+```{r}
+sapply(train_df, function(x) sum(is.na(x)))
+```
+
+```{r}
+sapply(test_df, function(x) sum(is.na(x)))
+```
+
+訓練データはAge, Cabin, Embarkedに、テストデータはAge, Fare, Cabinに欠損値が存在する。
+
+## 簡易集計
+
+```{r}
+summary(train_df)
+```
+
+## 可視化
+
+各変数と生存・死亡の関係をプロットして確認する。
+
+### 生存者と死亡者の数
+
+```{r}
+train_df %>%
+  ggplot(aes(x = Survived)) +
+  geom_bar() +
+  scale_x_continuous(breaks = c(0, 1), labels = c("0:Dead", "1:Survived"))
+```
+
+また、Survivedの平均をとることで生存率を求めることができる。
+
+```{r}
+train_df %>%
+  summarise(SurviveRate = mean(Survived))
+```
+
+### 性別との関係
+
+```{r}
+train_df %>%
+  ggplot(aes(x = Survived, fill = Sex)) +
+  geom_bar(position = "dodge") +
+  scale_x_continuous(breaks = c(0, 1), labels = c("0:Dead", "1:Survived"))
+```
+
+```{r}
+train_df %>%
+  group_by(Sex) %>%
+  summarise(mean(Survived))
+```
+
+死亡者に占める数では男性の方が圧倒的に多く、また死亡率も男性の方が高い事がわかる。
+
+### チケットクラスとの関係
+
+```{r}
+train_df %>%
+  ggplot(aes(x = Survived, fill = factor(Pclass))) +
+  geom_bar(position = "dodge") +
+  scale_x_continuous(breaks = c(0, 1), label = c("0:Dead", "1:Survived")) +
+  scale_fill_discrete(name = "Pclass")
+```
+
+```{r}
+train_df %>%
+  group_by(Pclass) %>%
+  summarise(mean(Survived))
+```
+
+### 年齢との関係
+
+```{r}
+train_df %>%
+  ggplot(aes(x = Age)) +
+  geom_histogram(bins = 30, alpha = .5, color = 1, fill = NA) +
+  geom_histogram(aes(fill = factor(Survived)), position = "identity", bins = 30, alpha = .5) +
+  scale_fill_discrete(name = "Survived", labels = c("0" = "0:Dead", "1" = "1:Survived")) +
+  theme_bw()
+```
+
+年齢は階級に区切ってから集計する。
+
+```{r}
+train_df %>%
+  mutate(CAge = cut(Age, 8)) %>%
+  group_by(CAge) %>%
+  summarise(mean(Survived))
+```
+
+### 兄弟・配偶者の数との関係
+
+モザイクプロットで確認する。
+
+```{r}
+mosaicplot(Survived ~ SibSp, data = train_df)
+```
+
+兄弟・配偶者の数は0または1人の乗客が多く、また0人の場合は死亡率が高いことが予想される。
+
+```{r}
+train_df %>%
+  group_by(SibSp) %>%
+  summarise(mean(Survived))
+```
+
+### 親・子の人数との関係
+
+```{r}
+mosaicplot(Survived ~ Parch, data = train_df)
+```
+
+親、子の人数は3人以上の乗客は少なく、0人の場合に死亡率が高い事が伺える。
+
+```{r}
+train_df %>%
+  group_by(Parch) %>%
+  summarise(mean(Survived))
+```
+
+### 一人で乗船しているかどうかとの関係
+
+SibSpとParchの分析結果より、一人で乗船している場合に死亡率が高いのではないかと考えられる。
+
+新しい変数FamilySizeを、`SibSp + Parch + 1`として定義し、死亡率との関係を確認する。
+
+```{r}
+train_df %>%
+  mutate(FamilySize = SibSp + Parch + 1) %>%
+  ggplot(aes(x = Survived, fill = factor(FamilySize))) +
+  geom_bar(position = "dodge") +
+  scale_fill_discrete(name = "FamilySize") +
+  scale_x_continuous(breaks = c(0, 1), labels = c("0:Dead", "1:Survived"))
+```
+
+```{r}
+train_df %>%
+  mutate(FamilySize = SibSp + Parch + 1) %>%
+  group_by(FamilySize) %>%
+  summarise(mean(Survived))
+```
+
+### 運賃の分布
+
+運賃の分布は右に長い裾を引く形となっている。
+
+```{r}
+train_df %>%
+  ggplot(aes(x = Fare)) +
+  geom_histogram()
+```
+
+`cut()`による分割では分布が集中している部分に偏るため、各階級の度数が等しく成るように分割する`ggplot2::cut_number()`を使用する。
+
+```{r}
+train_df %>%
+  mutate(CFare = cut_number(Fare, 4)) %>%
+  group_by(CFare) %>%
+  summarise(mean(Survived))
+```
+
+### 名前の解析
+
+名前そのものは特徴量として使えないが、名前についている敬称は何らかの属性を反映している可能性がある。
+
+```{r}
+train_df %>%
+  mutate(Title = stringr::str_match(Name, "([A-za-z]+)\\.")[,2]) %>%
+  group_by(Title) %>%
+  summarize(MeanAge = mean(Age, na.rm = TRUE),
+            count = length(Title)) %>%
+  arrange(desc(count))
+```
+
