@@ -11,7 +11,7 @@ start:
     -v ~/.R/rstudio/keybindings:/home/rstudio/.R/rstudio/keybindings \
     -v $(PWD):/home/rstudio/doc \
     --name $(NAME) \
-    -p 8787:8787 ml-python-with-r \
+    -p 8787:8787 nozma/ml-python-with-r \
 
 contener=`docker ps -a -q`
 image=`docker images | awk '/^<none>/ { print $$3 }'`
