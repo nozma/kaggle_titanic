@@ -1,0 +1,157 @@
+---
+title: "mlrによる欠損値の代入"
+author: '@nozma'
+date: "2018/5/6"
+output: github_document
+---
+
+以下の文章はmlrパッケージのチュートリアルの一部である[Imputation - mlr tutorial](https://mlr-org.github.io/mlr-tutorial/devel/html/impute/index.html)を訳したものです。
+
+```{r setup, include=FALSE}
+library(mlr)
+```
+
+# 欠損値に対する代入
+
+欠損値に対してmlrパッケージは、[imputations function | R Documentation](https://www.rdocumentation.org/packages/mlr/versions/2.12.1/topics/imputations)にリストアップしている複数の代入法をサポートしている。この中には、定数(固定値、平均値、中央値、最頻値など)で代入する標準的な方法と、乱数(対象の特徴量の経験分布または特定の分布族からの抽出)を用いる方法の両方が含まれている。さらに、欠損値を他の特徴量に基づく教師あり学習からの予測値で置き換える方法もmlrには含まれている。
+
+もし望みの代入方法が存在しなければ、これを拡張することも簡単にできる(詳しくは[Create Imputation Methods - mlr tutorial](https://mlr-org.github.io/mlr-tutorial/devel/html/create_imputation/index.html)を参照のこと)。
+
+mlrに含まれている学習アルゴリズムの中には、欠損値を適当な方法(つまり、単に削除する以外の方法で)扱えるものも含まれているという点にも注意してほしい。そのような学習器は"missings"プロパティを持っている。これは、`listLearners`関数を用いると確認することができる。
+
+```{r}
+listLearners("regr", properties = "missings")[c("class", "package")]
+```
+
+詳細については[Integrated Learners - mlr tutorial](https://mlr-org.github.io/mlr-tutorial/devel/html/integrated_learners/index.html)を確認してもらいたい。
+
+## 代入と再代入
+
+代入は`inpute`関数により実行される。代入方法は、特徴量ごとに、あるいは数値型や因子型といったクラスごとに指定することができる。さらに、個々の特徴量あるいは特徴量のクラスのいずれを指定する場合でも、欠損値を示すダミー変数を生成することもできる。これにより、欠損値のデータの傾向を特定することや、後の分析で代入された値と本来の観測値を分けて取り扱うことが可能となる。
+
+まず、例として`airquality`データセットを見てみよう(cf. [airquality function | R Documentation](https://www.rdocumentation.org/packages/datasets/versions/3.5.0/topics/airquality))。
+
+```{r}
+summary(airquality)
+```
+
+`Ozone`には37、`Solar`には7つの欠損値があることが分かる。今回、例のために`Wind`に人工的な欠損値を追加し、さらに`Wind`を因子型変数に変換する。
+
+```{r}
+set.seed(123)
+airq <- airquality
+ind <- sample(nrow(airq), 10)
+airq$Wind[ind] <-  NA
+airq$Wind <- cut(airq$Wind, c(0, 8, 16, 24))
+summary(airq)
+```
+
+まず、全ての整数型特徴量の欠損値を平均値で、因子型特徴量の欠損値を最頻値で代入し、全ての整数型特徴量に対してダミー変数を生成する方法を示す。
+
+```{r}
+imp = impute(
+  airq, # データセットの指定
+  classes = list(integer = imputeMean(), factor = imputeMode()), # クラス毎に代入法指定
+  dummy.classes = "integer" # ダミー変数を作成するクラスの指定
+)
+```
+
+`impute`の返り値はリストであり、`$data`スロットに代入済みのデータセットが含まれる。デフォルトでは、ダミー変数は`TRUE`と`FALSE`の2水準を持つ因子型(訳注:論理型ではない!)である。これは0と1の変数にすることもできる。
+
+```{r}
+head(imp$data)
+```
+
+`$desc`スロットにはImputationDescオブジェクトが格納されている。このオブジェクトの中には代入に関する全ての情報が保存されている。今回の例では、代入のために計算された平均値や最頻値が含まれている(訳注: `imp$desc$impute`の中に計算結果が入っているが表示が長いので略)。
+
+```{r}
+imp$desc
+```
+
+上記Imputation descriptionの中には、目的変数の名前(今回は存在しない)、特徴量の数と代入された特徴量の数が表示される。なお、ここでいう**代入された特徴量の数**というのは、実際にNAを含んでいて代入が行われた特徴量の数**という意味ではない**ことに注意してほしい。この数は、代入方法が指定された特徴量の数である。今回は、5つの整数型特徴量と1つの因子型特徴量に対して代入方法を指定しているので、6という値になっている。`dummy.type`は、作成されたダミー変数が因子型であることを示している。`impute.factor.levels`と`recode.factor.levels`についての詳細はimpute関数のヘルプ([impute function | R Documentation](https://www.rdocumentation.org/packages/mlr/versions/2.12.1/topics/impute))を参照してもらいたい。
+
+次に、目的変数を含む場合の例を見てみよう。airqualityデータを使った学習タスクの例として、オゾン濃度を他の気象要素から予測する、というものを考えてみる。この目的のためには`Day`と`Month`列は不要なので、まずはこれを除外する。
+
+```{r}
+airq <- subset(airq, select = 1:4)
+```
+
+最初の100の観測値を訓練セット、残りをテストセットとする。
+
+```{r}
+airq.train <- airq[1:100, ]
+airq.test <- airq[-c(1:100), ]
+```
+
+教師あり学習の問題においては、impute関数を呼び出す際に目的変数を指定する必要がある。これにより、代入とダミー変数の生成が目的変数に適用されなくなり、(他の特徴量に対する)代入のために目的変数が使われることもなくなる。
+
+先程は代入する特徴量をクラス単位で指定したが、今回は特徴量毎に代入方法を指定してみよう。
+
+`Solar.R`の欠損値は、欠損していない観測値に基づく経験分布からの乱数で代入する。
+
+`inputeLearner`関数は、代入のためにmlrに統合された全ての教師あり学習アルゴリズムを使用することができる。学習器のタイプ(`regr`なのか`classif`なのか)は、特徴量のクラスに応じて指定しなければならない。今回、`Wind`の欠損値は分類木(`rpart`)による予測結果で代入する。このとき、デフォルトでは目的変数と`Wind`以外の利用可能な全ての特徴量が分類木構築のために使われる(今回の例では`Solar.R`と`Temp`だ)。使用する特徴量は任意に指定することもできる。なお、`rpart`は欠損値があっても動作するので、`Solar.R`のNAは問題にはならない。
+
+```{r}
+imp <- impute(
+  airq.train, 
+  target = "Ozone", 
+  cols = list(
+    Solar.R = imputeHist(),
+    Wind = imputeLearner("classif.rpart")
+  ),
+  dummy.cols = c("Solar.R", "Wind")
+)
+summary(imp$data)
+```
+
+```{r}
+imp$desc
+```
+
+ImputationDescオブジェクトは、`reimpute`関数に引数として与えることで、テストセットに訓練セットと同様の方法で代入を行うことができる。
+
+```{r}
+airq.test.imp <- reimpute(airq.test, imp$desc)
+head(airq.test.imp)
+```
+
+いくつかのリサンプリング手法によって機械学習の手法を評価したいという場合には、impute/reimpute関数が、訓練と予測の前に自動的に呼び出されるのが望ましいと考えるだろう。これは、代入ラッパーを作成することで実現できる。
+
+## 学習器と代入の融合
+
+`makeImputeWrapper`関数を使うことで、学習器と代入を組み合わせることができる。この関数の引数は基本的には`impute`関数と同様である。先ほどと同様に、`Solar.R`は経験分布に基づく乱数で、`Wind`は分類木による予測値で代入し、さらに両方の変数について代入した値であるかどうかを示すダミー変数を生成しよう。
+
+```{r}
+lrn = makeImputeWrapper(
+  "regr.lm",
+  cols = list(
+    Solar.R = imputeHist(),
+    Wind = imputeLearner("classif.rpart")
+  ),
+  dummy.cols = c("Solar.R", "Wind")
+)
+lrn
+```
+
+学習器を訓練する前には、`impute`関数が呼び出されて訓練セットに対する代入が行われる。また、予測を行う前には`reimpute`関数が呼び出され、訓練段階で作成されたImputationDescオブジェクトを使ってテストセットに対する代入が行われる。
+
+さて、再びオゾン濃度を気象要素から予測することを考えてみよう。タスクを作成するためには、目的変数に欠損値があるレコードを削除しなければならない。
+
+```{r}
+airq <- subset(airq, subset = !is.na(airq$Ozone))
+task <- makeRegrTask(data = airq, target = "Ozone")
+```
+
+続いて、3分割クロスバリデーションによって平均二乗誤差を計算する。
+
+```{r}
+rdesc <- makeResampleDesc("CV", iter = 3)
+r <- resample(lrn, task, resampling = rdesc, show.info = FALSE, models = TRUE)
+r$aggr
+```
+
+```{r}
+lapply(r$models, getLearnerModel, more.unwrap = TRUE)
+```
+
+この他に、`makePreprocWrapperCaret`関数をつかって学習器と代入を融合する手段もある。この関数は`caret`パッケージの`preProcess`関数へのインターフェースとなっている。`preProcess`関数がサポートするのは数値型の特徴量のみであり、k最近傍点法、bagged tree、中央値による代入が可能である。
