@@ -1,0 +1,80 @@
+---
+title: "9.0-mlt-tutorial-Feature-Selection"
+author: '@nozma'
+date: "2018/5/14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# mlrパッケージを使用した特徴量選択
+
+(※以下の文章は[Feature Selection • mlr](https://mlr-org.github.io/mlr/articles/tutorial/devel/feature_selection.html)を翻訳したものです。)
+
+しばしば、データセットは非常に多くの特徴量を持つことがある。適切な特徴量を抽出するための手法を特徴量選択と呼ぶ。特徴量選択によってモデルは解釈しやすくなり、学習プロセスのスピードアップと学習器のパフォーマンス向上も図れる。適切な特徴量を特定するための手法はいくつかある。`mlr`パッケージは手法としてフィルターとラッパーをサポートしている。
+
+## フィルター
+
+フィルターはそれぞれの特徴量に対して重要度を割り当てる。割り当てられた値に応じて特徴量は順位付けられ、選抜される。
+
+### 特徴量の重要度計算
+
+特徴量の重要度を計算する複数の方法が`mlr`の`generateFilterValuesData()`関数には組み込まれている(`getFilterValues()`関数はdeprecatedとなっている)。現状では、分類、回帰、生存分析のタスクがサポートされている。使用可能な全ての手法は[Integrated Filter Methods • mlr](https://mlr-org.github.io/mlr/articles/tutorial/devel/filter_methods.html)に示されている。
+
+`generateFilterValuesData()`は`Task`オブジェクトとフィルター手法を指定する文字列を引数にとる。
+
+```{r}
+fv <- generateFilterValuesData(iris.task, method = "information.gain")
+fv
+```
+
+上記の`fv`は`FilterValues`オブジェクトであり、`$data`スロットにデータフレームの形で全ての特徴量の重要度が格納されている。また、ベクトルとして複数のフィルター手法を指定することもできる。
+
+```{r}
+fv2 <- generateFilterValuesData(iris.task, method = c("information.gain", "chi.squared"))
+fv2$data
+```
+
+`plotFilterValues()`関数を使用することで、個々の特徴量の重要度を棒グラフで可視化できる。
+
+```{r}
+plotFilterValues(fv2)
+```
+
+`geenerateFilterValuesData`を呼び出す際に複数のフィルター手法を指定した場合には、`plotFilterValues`はデフォルトでフィルター手法ごとにプロットを作成する。
+
+また、試験的段階ではあるが、`plotFilterValuesGGVIS`関数を使うことで`ggvis`を用いたプロットも可能である。この関数は`plotFilterValues()`関数と同様の引数をとるが、実行するとShinyアプリケーションが起動し、表示するフィルター手法や特徴量の数、特徴量の並び替えなどのインタラクティブな操作が可能となる(注: mlr2.12.1、2.13で確認したが、現在GGVIS関連の関数は利用できない様子である)。
+
+```r
+plotFilterValuesGGVIS(fv2)
+```
+
+### 特徴量の選択
+
+`filterFeatures()`関数を使用することで、重要度の低い特徴量を除外した新しいタスクを作成できる。
+
+重要度に基いて特徴量を選択する方法はいくつかある。
+
+- 特徴量の絶対数(`abs`)を決めて重要度が高いものを選ぶ方法。
+- 特徴量の割合(`perc`)を決めて重要度が高いものを選ぶ方法。
+- 重要度が一定の閾値(`threshold`)を上回った特徴量を全て残す方法。
+
+この後に示すように、`filterFeatures()`関数は上記三つの手法をサポートしている。また、`method`引数を通じて重要度の計算方法を指定したり、`fval`引数を通じて事前に計算した重要度を与えることもできる。
+
+```{r}
+### 重要度上位2つの特徴量を選択する例
+filterd.task <- filterFeatures(iris.task, method = "information.gain", abs = 2)
+
+### 重要度上位25%の特徴量を選択する例
+filterd.task <- filterFeatures(iris.task, fval = fv, perc = 0.25)
+
+### 閾値を0.5として、これを上回る重要度の特徴量をすべて残す例
+filterd.task <- filterFeatures(iris.task, fval = fv, threshold = 0.5)
+
+filterd.task
+```
+
+### 学習器とフィルター手法を融合する
+
